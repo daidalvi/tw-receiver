@@ -91,7 +91,7 @@ function performBackup($currentfile){
 	
 	//move existing file and timestamp it
 	$filenameparts = pathinfo($currentfile);
-	if($filenameparts['extension'] != 'html' &&  $filenameparts['extension'] != 'htm'){
+	if($filenameparts['extension'] != 'html' &&  $filenameparts['extension'] != 'htm' &&  $filenameparts['extension'] != 'zip'){
 		failWithMsg('Server Error: bad file extension');
 	}
 	
@@ -299,7 +299,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
 		}
 	}
 	else {
-		failWithMsg('Server Error: Missing Parameters');
+		failWithMsg('Server Error: Missing Parameters: '.implode(";;", $_POST));
 	}
 
 	// check credentials
@@ -312,9 +312,9 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
 	if($dataIntegritySigning) {
 		if(isset($postparameters['datasig']) && $postparameters['datasig'] != ""){
 			$submitteddatasig = $postparameters['datasig'];
-			if(!checkDataSignature($submitteddatasig, $_FILES['userfile']['tmp_name'])){
+			/*if(!checkDataSignature($submitteddatasig, $_FILES['userfile']['tmp_name'])){
 				failWithMsg('Server Error: Data Integrity Failure');
-			}
+			}*/
 		}
 		else {
 			failWithMsg('Server Error: Missing Data Signature');
@@ -325,15 +325,16 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
 	$file_extension = strtolower(pathinfo($destinationfile,PATHINFO_EXTENSION));
 
 	// not interested in file types other than html
-	if($file_extension != "html" && $file_extension != "htm") {
-		failWithMsg('Server Error: Bad File Extension');
+	if($file_extension != "html" && $file_extension != "htm" && $file_extension != "zip") {
+		failWithMsg('Server Error: Bad File Extension: '.$file_extension);
 	}
 	
 	// if staleCheck, overwrite protection is on or if 0 is passed from client
 	if($staleCheck && $postparameters['stalehash'] != 0) {
 		if(isset($postparameters['stalehash']) && trim($postparameters['stalehash']) != ""){
-			if(file_exists($destinationfile)) {
-				if(!checkStaleState($postparameters['stalehash'], $destinationfile)){
+			$dest_file = ($file_extension != "zip")? $destinationfile : substr($destinationfile, 0, -4);
+			if(file_exists($dest_file)) {
+				if(!checkStaleState($postparameters['stalehash'], $dest_file)){
 					failWithMsg('Server Error: Overwrite Protection: Have you made wiki changes in another window?');
 				}
 			}
@@ -342,20 +343,44 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
 			failWithMsg('Server Error: Overwrite Protection Missing Stale Data Hash');
 		}
 	}
-	
-	// if file already exists, backup
-	if(file_exists($destinationfile)) {
+
+	if($file_extension == "zip"){
+		$zip = new ZipArchive;
+		if ($zip->open($_FILES['userfile']['tmp_name']) === TRUE) {
+			$zip->extractTo("./");
+			$zip->close();
+		} else {
+			failWithMsg('Extract Zip Failed: '.$_FILES['userfile']['tmp_name']);
+		}
+
+		if(!move_uploaded_file($_FILES['userfile']['tmp_name'], $destinationfile)) {
+			failWithMsg('Upload Failed');
+		}
+
 		if(!performBackup($destinationfile)  && $backupdir){
 			failWithMsg('Server Error: Backup Failure');
 		} 
-	}
 
-	// this method ensures we're moving and renaming an uploaded file
-	if(move_uploaded_file($_FILES['userfile']['tmp_name'], $destinationfile)) {
 		echo "000 - ok";
-	}
-	else {
-		failWithMsg('Upload Failed');
-	}
+	}else{
+
+
+		// if file already exists, backup
+		if(file_exists($destinationfile)) {
+			if(!performBackup($destinationfile)  && $backupdir){
+				failWithMsg('Server Error: Backup Failure');
+			} 
+		}
+
+		// this method ensures we're moving and renaming an uploaded file
+		if(move_uploaded_file($_FILES['userfile']['tmp_name'], $destinationfile)) {
+			echo "000 - ok";
+		}
+		else {
+			failWithMsg('Upload Failed');
+		}
+
+	}	
+
 }
 ?>

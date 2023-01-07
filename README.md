@@ -1,6 +1,12 @@
 
 # TW Receiver
 
+## TW Receiver Fork - add Zip compress / decompress
+- JS zip creates via zip.js: https://github.com/gildas-lormeau/zip.js
+- In backend unzip via ZipArchive: https://www.php.net/manual/en/class.ziparchive.php
+
+If the size of your wiki exceeds `post_max_size` value on the server, you can check option "Create zip archive" in plugin settings to compress the document in the zip archive on the client side and send it to server where it decompress
+
 ## About
 A TiddlyWiki plugin used for saving to a PHP based server.
 

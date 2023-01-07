@@ -5,6 +5,8 @@ module-type: saver
 
 Handles saving wiki via POST to server storage
 
+Xekima: using zip.js to compress wiki: https://github.com/gildas-lormeau/zip.js
+
 \*/
 
 (function(){
@@ -38,6 +40,7 @@ ReceiverSaver.prototype.save = function(text,method,callback) {
 	var seckey = $tw.utils.getPassword("tw-receiver-seckey"); //reminder: this util uses html5.localStorage (secvio)
 	var wikiname = $tw.wiki.getTextReference("$:/tw-receiver-wikiname");
 	var serverurl = $tw.wiki.getTextReference("$:/tw-receiver-serverurl");
+	var makezip = ($tw.wiki.getTextReference("$:/tw-receiver-zip") == "yes");
 	var cdauthentication = true; //challenge digest auth
 	var signdata = true; //integrity check
 	var stalecheck = false; //overwrite stale instance check 
@@ -50,6 +53,7 @@ ReceiverSaver.prototype.save = function(text,method,callback) {
 	if($tw.wiki.getTextReference("$:/tw-receiver-signdata") == "no") {
 		signdata = false;
 	}
+	
 	
 	// if we're not provided a filename, try to get the name of the wiki from the URL
 	if(!wikiname) {
@@ -92,39 +96,78 @@ ReceiverSaver.prototype.save = function(text,method,callback) {
 	
 	// helper function encapsulates the actual data post
 	// modified version of the upload.js saver from TiddlyWiki core
-	var postToServer = function(){
+	var postToServer = async function(){
 		// text,seckey,filename,serverurl
-		var retResp = false;
-		// assemble the header
-		var boundary = "-------" + "81fd830c85363675edb98d2879916d8c";	
-		var header = [];
-		header.push("--" + boundary + "\r\nContent-disposition: form-data; name=\"twreceiverparams\"\r\n");
-		header.push("seckey=" + seckey + "&wikiname=" + wikiname + "&datasig=" + datasig + "&stalehash=" + stalehash); 
-		header.push("\r\n" + "--" + boundary);
-		header.push("Content-disposition: form-data; name=\"userfile\"; filename=\"" + wikiname + "\"");
-		header.push("Content-Type: text/html;charset=UTF-8");
-		header.push("Content-Length: " + text.length + "\r\n");
-		header.push("");
-		// assemble the tail and the data itself
-		var tail = "\r\n--" + boundary + "--\r\n";
-		var	data = header.join("\r\n") + text + tail;
-		// do the HTTP post
-		var http = new XMLHttpRequest();
-		http.open("POST",serverurl,true);
-		http.setRequestHeader("Content-Type","multipart/form-data; charset=UTF-8; boundary=" + boundary);
-		http.onreadystatechange = function() {
-			if(http.readyState == 4 && http.status == 200) {
-				if(http.responseText.substr(0,8) === "000 - ok") {
-					callback(null);
-					if(stalecheck) {
-						// update stale hash to current
-						$tw.wiki.setTextReference('$:/temp/tw-receiver-stalehash',getSHA256(text));
+		if(makezip){
+
+			var zip = require("$:/plugins/sendwheel/tw-receiver/zip.js");
+
+			const zipFileWriter = new zip.BlobWriter();
+			const helloWorldReader = new zip.TextReader(text);
+	
+
+			const zipWriter = new zip.ZipWriter(zipFileWriter);
+			await zipWriter.add(wikiname, helloWorldReader);
+			await zipWriter.close();
+			const zipFileBlob = await zipFileWriter.getData();
+
+			wikiname +=".zip";
+
+			var data = new FormData();
+			data.append('twreceiverparams', "seckey=" + seckey + "&wikiname=" + wikiname + "&datasig=" + datasig + "&stalehash=" + stalehash);			
+			data.append('userfile', zipFileBlob, wikiname);
+
+			var http = new XMLHttpRequest();
+			http.open("POST",serverurl,true);
+			http.onreadystatechange = function() {
+				if(http.readyState == 4 && http.status == 200) {
+					if(http.responseText.substr(0,8) === "000 - ok") {
+						callback(null);
+						if(stalecheck) {
+							// update stale hash to current
+							$tw.wiki.setTextReference('$:/temp/tw-receiver-stalehash',getSHA256(text));
+						}
+					} else {
+						callback("Error:\n" + http.responseText);
 					}
-				} else {
-					callback("Error:\n" + http.responseText);
 				}
-			}
-		};
+			};
+
+		}else{
+
+			var retResp = false;
+			// assemble the header
+			var boundary = "-------" + "81fd830c85363675edb98d2879916d8c";	
+			var header = [];
+			header.push("--" + boundary + "\r\nContent-disposition: form-data; name=\"twreceiverparams\"\r\n");
+			header.push("seckey=" + seckey + "&wikiname=" + wikiname + "&datasig=" + datasig + "&stalehash=" + stalehash); 
+			header.push("\r\n" + "--" + boundary);
+			header.push("Content-disposition: form-data; name=\"userfile\"; filename=\"" + wikiname + "\"");
+			header.push("Content-Type: text/html;charset=UTF-8");
+			header.push("Content-Length: " + text.length + "\r\n");
+			header.push("");
+			// assemble the tail and the data itself
+			var tail = "\r\n--" + boundary + "--\r\n";
+			var	data = header.join("\r\n") + text + tail;
+			// do the HTTP post
+			var http = new XMLHttpRequest();
+			http.open("POST",serverurl,true);
+			http.setRequestHeader("Content-Type","multipart/form-data; charset=UTF-8; boundary=" + boundary);
+			http.onreadystatechange = function() {
+				if(http.readyState == 4 && http.status == 200) {
+					if(http.responseText.substr(0,8) === "000 - ok") {
+						callback(null);
+						if(stalecheck) {
+							// update stale hash to current
+							$tw.wiki.setTextReference('$:/temp/tw-receiver-stalehash',getSHA256(text));
+						}
+					} else {
+						callback("Error:\n" + http.responseText);
+					}
+				}
+			};
+
+		}
 		try {
 			http.send(data);
 		} catch(ex) {
